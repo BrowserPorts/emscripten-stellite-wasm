@@ -5,9 +5,11 @@
 
 #include <emscripten/threading.h>
 #include <stdlib.h>
+#include <vector>
 
 #include "backend.h"
 #include "file.h"
+#include "memory_backend.h"
 #include "opfs_backend.h"
 #include "support.h"
 #include "thread_utils.h"
@@ -43,7 +45,7 @@ public:
 
 class OpenState {
 public:
-  enum Kind { None, Access, Blob };
+  enum Kind { None, Access, Blob, Error };
 
 private:
   Kind kind = None;
@@ -52,8 +54,13 @@ private:
 
 public:
   Kind getKind() { return kind; }
+  size_t getOpenCount() { return openCount; }
+  int getError() { return kind == Error ? id : 0; }
 
   int open(Worker& proxy, int fileID, oflags_t flags) {
+    if (kind == Error) {
+      return id;
+    }
     if (kind == None) {
       assert(openCount == 0);
       switch (flags) {
@@ -110,6 +117,8 @@ public:
         case Blob:
           proxy([&]() { _wasmfs_opfs_close_blob(id); });
           break;
+        case Error:
+          break;
         case None:
           WASMFS_UNREACHABLE("Open file should have kind");
       }
@@ -117,6 +126,21 @@ public:
       id = -1;
     }
     return err;
+  }
+
+  int closeAll(Worker& proxy) {
+    assert(openCount > 0);
+    openCount = 1;
+    return close(proxy);
+  }
+
+  void restore(Worker& proxy, int fileID, Kind previousKind, size_t count) {
+    const auto flags = previousKind == Access ? O_RDWR : O_RDONLY;
+    if (int err = open(proxy, fileID, flags)) {
+      kind = Error;
+      id = err;
+    }
+    openCount = count;
   }
 
   int getAccessID() {
@@ -139,6 +163,7 @@ public:
   Worker& proxy;
   int fileID;
   OpenState state;
+  std::shared_ptr<MemoryDataFile> unlinked;
 
   OPFSFile(mode_t mode, backend_t backend, int fileID, Worker& proxy)
     : DataFile(mode, backend), proxy(proxy), fileID(fileID) {}
@@ -148,8 +173,62 @@ public:
     proxy([&]() { _wasmfs_opfs_free_file(fileID); });
   }
 
+  int unlink(int dirID, const std::string& name) {
+    std::lock_guard lock(mutex);
+    auto remove = [&]() {
+      int err = 0;
+      proxy([&](auto ctx) {
+        _wasmfs_opfs_remove_child(ctx.ctx, dirID, name.c_str(), &err);
+      });
+      return err;
+    };
+    if (state.getKind() == OpenState::None) {
+      return remove();
+    }
+
+    // OPFS cannot remove a file with an open access handle. Preserve the inode
+    // in anonymous memory for existing descriptors, then release the OPFS lock.
+    const off_t size = getSize();
+    if (size < 0) {
+      return size;
+    }
+    auto snapshot = std::make_shared<MemoryDataFile>(mode, getBackend());
+    auto output = snapshot->locked();
+    if (int err = output.setSize(size)) {
+      return err;
+    }
+    std::vector<uint8_t> buffer(std::min<off_t>(65536, size));
+    for (off_t offset = 0; offset < size;) {
+      auto length = std::min<off_t>(buffer.size(), size - offset);
+      auto count = read(buffer.data(), length, offset);
+      if (count <= 0) {
+        return count ? count : -EIO;
+      }
+      auto written = output.write(buffer.data(), count, offset);
+      if (written != count) {
+        return written < 0 ? written : -EIO;
+      }
+      offset += count;
+    }
+    const auto previousKind = state.getKind();
+    const auto count = state.getOpenCount();
+    int err = state.closeAll(proxy);
+    if (!err) {
+      err = remove();
+    }
+    if (err) {
+      state.restore(proxy, fileID, previousKind, count);
+      return err;
+    }
+    unlinked = std::move(snapshot);
+    return 0;
+  }
+
 private:
   off_t getSize() override {
+    if (unlinked) {
+      return unlinked->locked().getSize();
+    }
     off_t size;
     switch (state.getKind()) {
       case OpenState::None:
@@ -165,6 +244,8 @@ private:
       case OpenState::Blob:
         proxy([&]() { size = _wasmfs_opfs_get_size_blob(state.getBlobID()); });
         break;
+      case OpenState::Error:
+        return state.getError();
       default:
         WASMFS_UNREACHABLE("Unexpected open state");
     }
@@ -172,6 +253,9 @@ private:
   }
 
   int setSize(off_t size) override {
+    if (unlinked) {
+      return unlinked->locked().setSize(size);
+    }
     int err = 0;
     switch (state.getKind()) {
       case OpenState::Access:
@@ -188,6 +272,8 @@ private:
         // TODO: Can we assume there are no other in-flight operations on this
         // file and do something better here?
         return -EIO;
+      case OpenState::Error:
+        return state.getError();
       case OpenState::None: {
         proxy([&](auto ctx) {
           _wasmfs_opfs_set_size_file(ctx.ctx, fileID, size, &err);
@@ -200,11 +286,16 @@ private:
     return err;
   }
 
-  int open(oflags_t flags) override { return state.open(proxy, fileID, flags); }
+  int open(oflags_t flags) override {
+    return unlinked ? 0 : state.open(proxy, fileID, flags);
+  }
 
-  int close() override { return state.close(proxy); }
+  int close() override { return unlinked ? 0 : state.close(proxy); }
 
   ssize_t read(uint8_t* buf, size_t len, off_t offset) override {
+    if (unlinked) {
+      return unlinked->locked().read(buf, len, offset);
+    }
     // TODO: use an i64 here.
     int32_t nread;
     switch (state.getKind()) {
@@ -220,6 +311,8 @@ private:
             ctx.ctx, state.getBlobID(), buf, len, offset, &nread);
         });
         break;
+      case OpenState::Error:
+        return state.getError();
       case OpenState::None:
       default:
         WASMFS_UNREACHABLE("Unexpected open state");
@@ -228,6 +321,12 @@ private:
   }
 
   ssize_t write(const uint8_t* buf, size_t len, off_t offset) override {
+    if (unlinked) {
+      return unlinked->locked().write(buf, len, offset);
+    }
+    if (int err = state.getError()) {
+      return err;
+    }
     assert(state.getKind() == OpenState::Access);
     // TODO: use an i64 here.
     int32_t nwritten;
@@ -239,6 +338,12 @@ private:
   }
 
   int flush() override {
+    if (unlinked) {
+      return 0;
+    }
+    if (int err = state.getError()) {
+      return err;
+    }
     int err = 0;
     switch (state.getKind()) {
       case OpenState::Access:
@@ -344,6 +449,10 @@ private:
   }
 
   int removeChild(const std::string& name) override {
+    auto child = getCachedChild(name);
+    if (child && child->is<DataFile>()) {
+      return std::static_pointer_cast<OPFSFile>(child)->unlink(dirID, name);
+    }
     int err = 0;
     proxy([&](auto ctx) {
       _wasmfs_opfs_remove_child(ctx.ctx, dirID, name.c_str(), &err);

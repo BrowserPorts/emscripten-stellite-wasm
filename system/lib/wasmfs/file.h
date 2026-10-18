@@ -204,6 +204,12 @@ private:
   std::map<std::string, DCacheEntry> dcache;
 
 protected:
+  // Consult the cache without discovering or inserting a new backend entry.
+  std::shared_ptr<File> getCachedChild(const std::string& name) {
+    const auto entry = dcache.find(name);
+    return entry == dcache.end() ? nullptr : entry->second.file;
+  }
+
   // Return the `File` object corresponding to the file with the given name or
   // null if there is none.
   virtual std::shared_ptr<File> getChild(const std::string& name) = 0;
