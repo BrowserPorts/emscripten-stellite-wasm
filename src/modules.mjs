@@ -94,6 +94,7 @@ function calculateLibraries() {
     libraries.push('libdylink.js');
   }
 
+  libraries.push('libsocket_events.js');
   if (FILESYSTEM) {
     libraries.push('libfs_shared.js');
     if (WASMFS) {
