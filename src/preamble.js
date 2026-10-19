@@ -446,7 +446,7 @@ function findWasmBinary() {
   }
 #endif
 
-  if (Module['locateFile']) {
+  if (Module['locateFile'] || Module['locateFileMap']) {
     return locateFile('{{{ WASM_BINARY_FILE }}}');
   }
 

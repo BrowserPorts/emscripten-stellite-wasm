@@ -179,6 +179,12 @@ function locateFile(path) {
 #if RUNTIME_DEBUG
   dbg('locateFile:', path, 'scriptDirectory:', scriptDirectory);
 #endif
+#if expectToReceiveOnModule('locateFileMap')
+  // Resolved asset URLs can be cloned into pthreads without serializing callbacks.
+  if (Module['locateFileMap'] && Object.hasOwn(Module['locateFileMap'], path)) {
+    return Module['locateFileMap'][path];
+  }
+#endif
 #if expectToReceiveOnModule('locateFile')
   if (Module['locateFile']) {
     return Module['locateFile'](path, scriptDirectory);

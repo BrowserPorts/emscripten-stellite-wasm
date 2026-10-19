@@ -71,6 +71,9 @@ if (ENVIRONMENT_IS_PTHREAD) {
           self.onmessage = handleMessage;
         };
 
+#if expectToReceiveOnModule('locateFileMap')
+        Module['locateFileMap'] = msgData.locateFileMap;
+#endif
 #if MAIN_MODULE
         dynamicLibraries = msgData.dynamicLibraries;
         sharedModules = msgData.sharedModules;

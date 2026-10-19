@@ -970,7 +970,7 @@ var INCOMING_MODULE_JS_API = [
   'buffer', 'canvas', 'doNotCaptureKeyboard', 'dynamicLibraries',
   'elementPointerLock', 'extraStackTrace', 'forcedAspectRatio',
   'instantiateWasm', 'keyboardListeningElement', 'freePreloadedMediaOnUse',
-  'locateFile', 'mainScriptUrlOrBlob', 'mem',
+  'locateFile', 'locateFileMap', 'mainScriptUrlOrBlob', 'mem',
   'monitorRunDependencies', 'noExitRuntime', 'noInitialRun', 'onAbort',
   'onExit', 'onFullScreen', 'onRuntimeInitialized', 'postMainLoop', 'postRun',
   'preInit', 'preMainLoop', 'preRun',

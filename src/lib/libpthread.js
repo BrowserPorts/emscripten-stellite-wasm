@@ -399,6 +399,9 @@ var LibraryPThread = {
       worker.postMessage({
         cmd: 'load',
         handlers: handlers,
+#if expectToReceiveOnModule('locateFileMap')
+        locateFileMap: Module['locateFileMap'],
+#endif
 #if WASM2JS
         // the polyfill WebAssembly.Memory instance has function properties,
         // which will fail in postMessage, so just send a custom object with the
