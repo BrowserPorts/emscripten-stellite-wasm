@@ -2094,10 +2094,14 @@ def fix_js_mangling(js_file):
     return
 
   src = read_file(js_file)
-  write_file(js_file, src
-             .replace('EMSCRIPTEN$IMPORT$META', 'import.meta')
-             .replace('EMSCRIPTEN$AWAIT$IMPORT', 'await import')
-             .replace('EMSCRIPTEN$AWAIT(', 'await ('))
+  if 'EMSCRIPTEN$AWAIT$IMPORT' in src:
+    # Restoring await changes call precedence. Preserve the parsed expression
+    # boundaries while retaining the final minifier's formatting.
+    src = building.acorn_optimizer(js_file, ['restoreESMImports'], return_output=True)
+  else:
+    src = (src.replace('EMSCRIPTEN$IMPORT$META', 'import.meta')
+           .replace('EMSCRIPTEN$AWAIT(', 'await ('))
+  write_file(js_file, src)
   save_intermediate('js-mangling')
 
 

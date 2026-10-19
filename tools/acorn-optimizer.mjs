@@ -83,6 +83,41 @@ function recursiveWalk(node, cs) {
 
 // AST Utilities
 
+// Restore module syntax after the legacy minifiers have finished. Parenthesize
+// whole placeholder calls before restoring await, which has lower precedence
+// than the member access or invocation that may follow the call.
+function restoreESMImports() {
+  const insertions = [];
+  const seen = new Set();
+  const placeholders = ['EMSCRIPTEN$AWAIT$IMPORT', 'EMSCRIPTEN$AWAIT'];
+  // Parse only placeholder expressions: the final wrapper can also contain
+  // source-phase import declarations that Acorn does not yet parse.
+  for (const token of acorn.tokenizer(input, params)) {
+    if (token.type.label !== 'name' || !placeholders.includes(token.value)) continue;
+    simpleWalk(acorn.parseExpressionAt(input, token.start, params), {
+      CallExpression(node) {
+        if (
+          node.callee.type === 'Identifier' &&
+          placeholders.includes(node.callee.name) &&
+          !seen.has(node.start)
+        ) {
+          seen.add(node.start);
+          insertions.push([node.start, '('], [node.end, ')']);
+        }
+      },
+    });
+  }
+  insertions.sort((a, b) => b[0] - a[0]);
+  let restored = input;
+  for (const [offset, text] of insertions) {
+    restored = restored.slice(0, offset) + text + restored.slice(offset);
+  }
+  return restored
+    .replaceAll('EMSCRIPTEN$IMPORT$META', 'import.meta')
+    .replaceAll('EMSCRIPTEN$AWAIT$IMPORT', 'await import')
+    .replaceAll('EMSCRIPTEN$AWAIT(', 'await (');
+}
+
 function emptyOut(node) {
   node.type = 'EmptyStatement';
 }
@@ -1749,12 +1784,18 @@ const registry = {
 };
 
 let ast;
+let output;
 try {
-  ast = acorn.parse(input, params);
-  for (let pass of passes) {
-    const resolvedPass = registry[pass];
-    assert(resolvedPass, `unknown optimizer pass: ${pass}`);
-    resolvedPass(ast);
+  if (passes.includes('restoreESMImports')) {
+    assert(passes.length === 1, 'source-preserving passes must run alone');
+    output = restoreESMImports();
+  } else {
+    ast = acorn.parse(input, params);
+    for (let pass of passes) {
+      const resolvedPass = registry[pass];
+      assert(resolvedPass, `unknown optimizer pass: ${pass}`);
+      resolvedPass(ast);
+    }
   }
 } catch (err) {
   if (err.loc) {
@@ -1767,22 +1808,24 @@ try {
 }
 
 if (!noPrint) {
-  const terserAst = terser.AST_Node.from_mozilla_ast(ast);
+  if (output === undefined) {
+    const terserAst = terser.AST_Node.from_mozilla_ast(ast);
 
-  if (closureFriendly) {
-    reattachComments(terserAst, sourceComments);
+    if (closureFriendly) {
+      reattachComments(terserAst, sourceComments);
+    }
+
+    output = terserAst.print_to_string({
+      beautify: !minifyWhitespace,
+      indent_level: minifyWhitespace ? 0 : 2,
+      keep_quoted_props: closureFriendly, // for closure
+      wrap_func_args: false, // don't add extra braces
+      comments: true, // for closure as well
+      shorthand: true, // Use object literal shorthand notation
+    });
   }
 
-  let output = terserAst.print_to_string({
-    beautify: !minifyWhitespace,
-    indent_level: minifyWhitespace ? 0 : 2,
-    keep_quoted_props: closureFriendly, // for closure
-    wrap_func_args: false, // don't add extra braces
-    comments: true, // for closure as well
-    shorthand: true, // Use object literal shorthand notation
-  });
-
-  output += '\n';
+  if (!output.endsWith('\n')) output += '\n';
   if (suffix) {
     output += suffix + '\n';
   }
