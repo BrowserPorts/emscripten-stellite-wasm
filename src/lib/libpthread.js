@@ -1139,7 +1139,7 @@ var LibraryPThread = {
     // Before we call the thread entry point, make sure any shared libraries
     // have been loaded on this thread.  Otherwise our table might be not be
     // in sync and might not contain the function pointer `ptr` at all.
-    __emscripten_dlsync_self();
+    {{{ awaitIf(ASYNCIFY == 2) }}}__emscripten_dlsync_self();
 #endif
     // pthread entry points are always of signature 'void *ThreadMain(void *arg)'
     // Native codebases sometimes spawn threads with other thread entry point

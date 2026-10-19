@@ -508,6 +508,8 @@ def setup_pthreads():
       '_emscripten_proxy_dlsync_async',
       '__dl_seterr',
     ]
+    if settings.ASYNCIFY == 2:
+      settings.ASYNCIFY_EXPORTS += ['_emscripten_dlsync_self']
 
   # runtime_pthread.js depends on these library symbols
   settings.DEFAULT_LIBRARY_FUNCS_TO_INCLUDE += [
