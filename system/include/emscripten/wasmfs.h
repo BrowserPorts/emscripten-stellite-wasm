@@ -22,6 +22,10 @@ backend_t wasmfs_get_backend_by_path(const char* _Nonnull path);
 // Obtains the backend_t of a specified fd.
 backend_t wasmfs_get_backend_by_fd(int fd);
 
+// Flushes open data files on backend, without closing them.
+// Returns 0 on success, or a negative errno on failure.
+int wasmfs_sync_backend(backend_t backend);
+
 // Creates and opens a new file using a specific backend.
 // Returns the file descriptor for the new file like `open`. Returns a negative
 // value on error. TODO: It might be worth returning a more specialized type

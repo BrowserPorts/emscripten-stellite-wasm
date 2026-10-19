@@ -120,6 +120,11 @@ public:
 
     std::shared_ptr<OpenFileState> getEntry(__wasi_fd_t fd);
 
+    // Snapshot open descriptors without keeping the table locked during I/O.
+    std::vector<std::shared_ptr<OpenFileState>> getEntries() {
+      return fileTable.entries;
+    }
+
     // Set the table slot at `fd` to the given file. If this overwrites the last
     // reference to an OpenFileState for a data file in the table, return the
     // file so it can be closed by the caller. Do not close the file directly in

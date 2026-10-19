@@ -6,6 +6,8 @@
 // This file defines the global state.
 
 #include <emscripten/threading.h>
+#include <errno.h>
+#include <unordered_set>
 
 #include "memory_backend.h"
 #include "paths.h"
@@ -64,6 +66,36 @@ extern "C" void wasmfs_flush(void) {
   // Flush our own streams. TODO: flush all backends.
   (void)SpecialFiles::getStdout()->locked().flush();
   (void)SpecialFiles::getStderr()->locked().flush();
+}
+
+extern "C" int wasmfs_sync_backend(backend_t backend) {
+  if (!backend) {
+    return -EINVAL;
+  }
+  std::vector<std::shared_ptr<OpenFileState>> entries;
+  {
+    auto table = wasmFS.getFileTable().locked();
+    entries = table.getEntries();
+  }
+  std::unordered_set<DataFile*> flushed;
+  int result = 0;
+  for (const auto& entry : entries) {
+    if (!entry) {
+      continue;
+    }
+    auto file = entry->locked().getFile()->dynCast<DataFile>();
+    if (!file || file->getBackend() != backend ||
+        !flushed.insert(file.get()).second) {
+      continue;
+    }
+    // Backends may proxy to another thread. Release the table and descriptor
+    // locks before waiting, matching the per-descriptor fsync operation.
+    int error = file->locked().flush();
+    if (error && !result) {
+      result = error;
+    }
+  }
+  return result;
 }
 
 WasmFS::~WasmFS() {
