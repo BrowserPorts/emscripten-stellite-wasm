@@ -65,6 +65,11 @@ get_filename_component(EMSCRIPTEN_ROOT_PATH "${EMSCRIPTEN_ROOT_PATH}" ABSOLUTE)
 
 list(APPEND CMAKE_MODULE_PATH "${EMSCRIPTEN_ROOT_PATH}/cmake/Modules")
 
+# Apply compiler defaults after CMake loads its own platform modules.
+if (NOT CMAKE_USER_MAKE_RULES_OVERRIDE)
+  set(CMAKE_USER_MAKE_RULES_OVERRIDE "${EMSCRIPTEN_ROOT_PATH}/cmake/Modules/EmscriptenIPO.cmake")
+endif()
+
 if (CMAKE_HOST_WIN32)
   # We use windows executables these days rather than `.bat` files, but we
   # still support a fallback of using `.bat` files.
