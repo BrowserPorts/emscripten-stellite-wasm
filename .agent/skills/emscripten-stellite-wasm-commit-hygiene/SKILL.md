@@ -34,7 +34,7 @@ Commit your own completed fix slices frequently after their relevant checks pass
 
 - `main` is the fork's branch and carries the JSPI, pthread, WasmFS and emitter work on top of the release tag `5.0.7`. There is no local upstream branch.
 - Bring upstream in by fetching the next release tag (`git fetch upstream tag 5.0.8`) and merging that tag into `main`, as its own commit with nothing else in it. Do not rebase `main`: azahar's gitlink pins its commits, and every Wasm build of azahar is compiled by it.
-- Forgejo keeps no `BrowserPorts/emscripten-stellite-wasm-upstream` pull mirror, so upstream commits get no exemption from the attribution hook. Before merging, run the range scan below over `main..<tag>`; if it matches, stop and report.
+- Upstream's own commits come in through the merge exactly as they are, whatever their messages carry. Never rewrite them and never strip lines from them.
 - Keep fork edits to upstream files small so merges stay cheap.
 - This repository is public. Forgejo pushes it to the read-only mirror at `github.com/BrowserPorts/emscripten-stellite-wasm`. Never push to GitHub directly, and never open a pull request or issue upstream from here.
 
@@ -67,7 +67,7 @@ Use Conventional Commits. Upstream writes its subjects without a type, so a type
 
 - Keep the subject at or below 72 characters, and describe behavior and technical rationale only.
 - Use the configured human author and committer.
-- No AI or model attribution of any kind: no `Co-Authored-By` naming Claude or Anthropic, no `noreply@anthropic.com`, no `Claude-Session` line, no generated-by line. Forgejo's pre-receive hook refuses a push that brings in such a commit.
+- No AI or model attribution of any kind: no `Co-Authored-By` naming Claude or Anthropic, no `noreply@anthropic.com`, no `Claude-Session` line, no generated-by line. Nothing on the server checks this, so the agent making the commit is responsible for keeping it out of every fork commit.
 - No sessions, prompts, task or rule numbers, agents, waves, worktrees, workflows, checkpoints, plans, transcripts, or process narration.
 
 Scan the exact proposed message before committing:
@@ -82,13 +82,14 @@ No matches are permitted.
 
 - Push only to `origin` on Forgejo, and only when authorized. `git remote get-url --push origin` must print the Forgejo URL. Never push to Cursor's origin (`origin.cursor.com`), to `upstream`, or to GitHub.
 - Push one branch with an explicit refspec: `git push origin main:main`. Never `--force`, `--all`, `--mirror`, `--tags`, or a bare `git push`.
-- Scan the whole outgoing range first, including commits already ahead of the remote and those an upstream merge brings:
+- Before every push, scan the whole outgoing range, including commits already ahead of the remote and those an upstream merge brings, and stop if anything matches:
 
 ```sh
 git log --format='%H%n%B' origin/main..HEAD | rg -ni 'co-authored-by:.*(claude|anthropic)|noreply@anthropic\.com|claude-session|generated(-by| with)'
 ```
 
-- If Forgejo refuses a push, report why. Do not rewrite history or work around the hook.
+- Stop on any match and look at it. A match in a fork commit is fixed before the push. A match in upstream's own commit, one an upstream merge brought in (`git merge-base --is-ancestor <hash> <tag>` succeeds), goes out exactly as it is: never rewrite it and never strip lines from it.
+- If Forgejo refuses a push, report why. Do not rewrite history to get around it.
 
 ## Safeguards
 
